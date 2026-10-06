@@ -107,22 +107,24 @@ Result rows (a public contract — stable across versions):
 
 ### 1. Install
 
-From source (recommended until the package is published on PyPI):
+local-memory is **not published on PyPI yet** — install it from the git
+repository:
+
+```bash
+pip install "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory.git"
+```
+
+Prefer a local checkout, or want the optional TF-IDF semantic-search fallback
+(scikit-learn)? Clone and install with the extra:
 
 ```bash
 git clone https://github.com/Sergey-Vladimirovich-Hankok/local-memory
 cd local-memory
-pip install -e .            # core (keyword + FTS search)
-pip install -e ".[semantic]"  # + TF-IDF semantic search fallback (scikit-learn)
+pip install ".[semantic]"
 ```
 
-Once available on PyPI:
-
-```bash
-pip install local-memory
-# optional: TF-IDF semantic search fallback
-pip install local-memory[semantic]
-```
+Once the package is published on PyPI (not yet — as of v0.1.0 the git
+repository is the only source), this becomes a plain `pip install local-memory`.
 
 ### 2. Initialize the database
 
@@ -147,10 +149,17 @@ local-memory search "pool timeout" --semantic
 
 ### 5. Connect an MCP client
 
+The package is not on PyPI yet, so MCP clients run it with `uvx` straight
+from the git repository — `uvx` builds and caches it for you:
+
+```bash
+uvx --from "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory" local-memory serve
+```
+
 Claude Code:
 
 ```bash
-claude mcp add local-memory -- local-memory serve
+claude mcp add local-memory -- uvx --from "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory" local-memory serve
 ```
 
 opencode (`opencode.json`):
@@ -160,7 +169,12 @@ opencode (`opencode.json`):
   "mcp": {
     "local-memory": {
       "command": "uvx",
-      "args": ["local-memory", "serve"]
+      "args": [
+        "--from",
+        "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory",
+        "local-memory",
+        "serve"
+      ]
     }
   }
 }
@@ -173,15 +187,20 @@ Cursor / any generic MCP client (`mcpServers` snippet):
   "mcpServers": {
     "local-memory": {
       "command": "uvx",
-      "args": ["local-memory", "serve"]
+      "args": [
+        "--from",
+        "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory",
+        "local-memory",
+        "serve"
+      ]
     }
   }
 }
 ```
 
-> If you installed from source (step 1) instead of PyPI, `uvx` cannot see the
-> package — point `command` at the installed binary directly:
-> `"command": "local-memory"` (see `examples/generic_mcp.json`).
+> Already installed with `pip` in step 1? You can skip `uvx` and point
+> `command` at the installed binary directly:
+> `"command": "local-memory", "args": ["serve"]` (see `examples/generic_mcp.json`).
 
 Ready-made snippets live in [`examples/`](examples/).
 

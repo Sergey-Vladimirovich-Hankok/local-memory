@@ -2,7 +2,12 @@
   "mcp": {
     "local-memory": {
       "command": "uvx",
-      "args": ["local-memory", "serve"]
+      "args": [
+        "--from",
+        "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory",
+        "local-memory",
+        "serve"
+      ]
     }
   }
 }
