@@ -1,3 +1,10 @@
+# local-memory — local-first long-term memory for AI agents
+# Copyright (c) 2026 Sergey Vladimirovich Hankok
+# Repository: https://github.com/Sergey-Vladimirovich-Hankok/local-memory
+# Author: kokgfnu@gmail.com
+# If you use, copy, fork or build upon this code, please keep this
+# attribution notice and a link to the repository above.
+
 """MCP tool handler tests: call the async handlers directly (no stdio transport).
 
 Verifies the six tools return JSON-serializable payloads and that errors

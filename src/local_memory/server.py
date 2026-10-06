@@ -1,3 +1,10 @@
+# local-memory — local-first long-term memory for AI agents
+# Copyright (c) 2026 Sergey Vladimirovich Hankok
+# Repository: https://github.com/Sergey-Vladimirovich-Hankok/local-memory
+# Author: kokgfnu@gmail.com
+# If you use, copy, fork or build upon this code, please keep this
+# attribution notice and a link to the repository above.
+
 """MCP stdio server: exposes the local-memory engine as six tools.
 
 Run with `local-memory serve` (or `python -m local_memory serve`). All tools

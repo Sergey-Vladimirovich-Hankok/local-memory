@@ -43,9 +43,12 @@ jobs:
       - name: Guard - no local paths or secrets in tracked files
         run: |
           # ci.yml is excluded: it legitimately contains the guard pattern itself
+          # kokgfnu@gmail.com is whitelisted: it is the project author's
+          # attribution email, required in source headers / README / NOTICE
           if grep -rInE '/home/|s[e]rgey|@mail|@gmail|ghp[_]|s[k]-[A-Za-z0-9]' \
               --include='*.py' --include='*.md' --include='*.json' --include='*.yml' \
-              . --exclude-dir=.git --exclude=ci.yml; then
+              . --exclude-dir=.git --exclude=ci.yml \
+              | grep -v 'kokgfnu@gmail.com'; then
             echo 'Local paths or secrets found in tracked files' >&2
             exit 1
           fi

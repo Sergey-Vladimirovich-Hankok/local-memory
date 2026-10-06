@@ -1,0 +1,23 @@
+NOTICE
+======
+
+local-memory — local-first long-term memory for AI agents
+
+Copyright (c) 2026 Sergey Vladimirovich Hankok <kokgfnu@gmail.com>
+
+Repository: https://github.com/Sergey-Vladimirovich-Hankok/local-memory
+
+local-memory is licensed under the MIT License; see LICENSE for the full
+license text.
+
+Attribution
+-----------
+
+If you use, copy, fork or build upon this code, please keep:
+
+  - the author notice in the source file headers,
+  - the repository link (https://github.com/Sergey-Vladimirovich-Hankok/local-memory),
+  - the contact email (kokgfnu@gmail.com).
+
+The MIT license defines your permissions; attribution keeps the work
+traceable to its author.

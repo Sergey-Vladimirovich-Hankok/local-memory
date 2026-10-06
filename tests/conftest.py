@@ -1,3 +1,10 @@
+# local-memory — local-first long-term memory for AI agents
+# Copyright (c) 2026 Sergey Vladimirovich Hankok
+# Repository: https://github.com/Sergey-Vladimirovich-Hankok/local-memory
+# Author: kokgfnu@gmail.com
+# If you use, copy, fork or build upon this code, please keep this
+# attribution notice and a link to the repository above.
+
 """Synthetic test fixtures: a throwaway memory.db with 3 sessions, ~30 chunks.
 
 NO real data is ever read from the host. Each test gets a fresh database in

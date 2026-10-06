@@ -309,6 +309,12 @@ repository's Security tab — not in public issues.
 
 [MIT](LICENSE) — do what you want, just keep the notice.
 
+Attribution — if you use or copy this code, keep the author notice in the
+source headers, the repository link
+(https://github.com/Sergey-Vladimirovich-Hankok/local-memory), and the
+contact email (kokgfnu@gmail.com). MIT license covers permissions;
+attribution keeps the work traceable. See [NOTICE](NOTICE).
+
 ---
 
 ## Roadmap
