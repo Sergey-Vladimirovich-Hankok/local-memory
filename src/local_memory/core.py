@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import embeddings, schema
 from . import search as search_mod
+from . import vectorstore
 
 DEFAULT_DB = Path.home() / '.local' / 'share' / 'local-memory' / 'memory.db'
 TFIDF_ROW_CAP = 50000
@@ -45,6 +46,7 @@ def connect(db=None) -> sqlite3.Connection:
     path = db_path(db)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
+    conn.execute('PRAGMA busy_timeout = 5000')
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -206,7 +208,7 @@ def status(db=None) -> dict:
     def _zero() -> dict:
         return {'db_path': str(path), 'exists': False, 'sessions': 0, 'chunks': 0,
                 'unique_chunks': 0, 'summaries': 0, 'db_size_bytes': 0,
-                'embeddings_cached': 0}
+                'embeddings_cached': 0, 'vector_backend': 'none'}
 
     if not path.exists():
         return _zero()
@@ -232,6 +234,7 @@ def status(db=None) -> dict:
             'summaries': _count('session_summaries'),
             'db_size_bytes': path.stat().st_size,
             'embeddings_cached': _count('chunk_embeddings'),
+            'vector_backend': vectorstore.describe(path, embeddings.model_key()),
         }
     finally:
         conn.close()
@@ -294,3 +297,38 @@ def ingest(session_id: str, content: str, project: str = '',
 def build(limit: int | None = None, db=None) -> dict:
     """Prebuild the embedding cache (requires EMBED_API_URL). Returns counts."""
     return embeddings.build(db_path(db), limit=limit)
+
+
+def migrate_vectors(db=None, remove_npy: bool = False) -> dict:
+    """Copy the existing .npy embedding cache into the sqlite-vec table.
+
+    The .npy files are kept unless remove_npy is set (explicit opt-in).
+    """
+    if not vectorstore.available():
+        raise RuntimeError(
+            'sqlite_vec is not installed; '
+            'pip install "local-memory[vector]" (or: pip install sqlite-vec)')
+    path = db_path(db)
+    cached = embeddings.load_matrix_cache(path)
+    if cached is None:
+        raise ValueError(
+            f'no .npy embedding cache found next to {path}; '
+            'run: local-memory build first')
+    ids, mat = cached
+    model = embeddings.model_key()
+    conn = sqlite3.connect(str(path))
+    try:
+        vectorstore.load_extension(conn)
+        vectorstore.ensure_table(conn, model, mat.shape[1])
+        written = vectorstore.upsert(conn, model, ids, mat)
+    finally:
+        conn.close()
+    npy_removed = False
+    if remove_npy:
+        ids_path, mat_path = embeddings.cache_paths(path)
+        for p in (ids_path, mat_path):
+            if p.exists():
+                p.unlink()
+                npy_removed = True
+    return {'migrated': written, 'dimension': int(mat.shape[1]),
+            'vector_backend': 'sqlitevec', 'npy_removed': npy_removed}

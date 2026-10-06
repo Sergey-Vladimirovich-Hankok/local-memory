@@ -5,7 +5,7 @@
 # If you use, copy, fork or build upon this code, please keep this
 # attribution notice and a link to the repository above.
 
-"""Command-line interface: local-memory {serve,init,ingest,search,fetch,build,status}.
+"""Command-line interface: local-memory {serve,init,ingest,search,fetch,build,status,config,migrate-vectors}.
 
 All human-facing commands print JSON to stdout and return a process exit code.
 """
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from . import __version__, core
@@ -30,7 +31,22 @@ def build_parser() -> argparse.ArgumentParser:
                         version=f'local-memory {__version__}')
     sub = parser.add_subparsers(dest='cmd', required=True)
 
-    sub.add_parser('serve', help='run the MCP stdio server (for MCP clients)')
+    p_serve = sub.add_parser(
+        'serve',
+        help='run the server: MCP stdio (default), plain REST, or MCP over HTTP')
+    p_serve.add_argument('--transport',
+                         choices=['stdio', 'http', 'mcp-http'],
+                         default='stdio',
+                         help='stdio = MCP stdio (default); http = plain REST '
+                              '(curl-friendly); mcp-http = MCP streamable-http')
+    p_serve.add_argument('--host', default=None,
+                         help='bind address (default 127.0.0.1 or MEMORY_HTTP_HOST)')
+    p_serve.add_argument('--port', type=int, default=None,
+                         help='port (default 8787 for http, 8000 for mcp-http, '
+                              'or MEMORY_HTTP_PORT for http)')
+    p_serve.add_argument('--token', default=None,
+                         help='bearer token clients must send '
+                              '(default: MEMORY_HTTP_TOKEN or none on loopback)')
     sub.add_parser('init', help='create the database and schema (idempotent)')
     sub.add_parser('status', help='print database statistics as JSON')
 
@@ -55,6 +71,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_build = sub.add_parser('build',
                              help='prebuild the embedding cache (needs EMBED_API_URL)')
     p_build.add_argument('--limit', type=int, default=None)
+
+    p_config = sub.add_parser(
+        'config', help='generate the MCP snippet for a client (no copy-paste errors)')
+    p_config.add_argument('--client', required=True,
+                          help='claude | opencode | cursor | generic')
+    p_config.add_argument('--setup', action='store_true',
+                          help='run the client registration command (claude)')
+    p_config.add_argument('--dry-run', action='store_true',
+                          help='with --setup: print the command instead of running it')
+
+    p_migrate = sub.add_parser(
+        'migrate-vectors',
+        help='copy the .npy embedding cache into the sqlite-vec table (extra [vector])')
+    p_migrate.add_argument('--remove-npy', action='store_true',
+                           help='delete the .npy cache files after a successful copy')
     return parser
 
 
@@ -62,8 +93,24 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.cmd == 'serve':
-            from .server import mcp
-            mcp.run()
+            host = args.host or os.environ.get('MEMORY_HTTP_HOST', '').strip() \
+                or '127.0.0.1'
+            token = args.token or os.environ.get('MEMORY_HTTP_TOKEN', '').strip() \
+                or None
+            if args.transport == 'stdio':
+                from .server import mcp
+                mcp.run()
+                return 0
+            if args.transport == 'http':
+                port = args.port if args.port is not None else int(
+                    os.environ.get('MEMORY_HTTP_PORT', '8787'))
+                from . import httpd
+                httpd.serve(host, port, token=token)
+                return 0
+            # mcp-http: MCP streamable-http transport
+            port = args.port if args.port is not None else 8000
+            from . import server as srv
+            srv.run_http(host, port)
             return 0
         if args.cmd == 'init':
             emit(core.init())
@@ -94,6 +141,20 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == 'build':
             emit(core.build(limit=args.limit))
+            return 0
+        if args.cmd == 'config':
+            from . import configgen
+            if args.setup:
+                cmd = configgen.setup_command(args.client)
+                if args.dry_run:
+                    emit({'command': cmd})
+                    return 0
+                import subprocess
+                return subprocess.run(cmd).returncode
+            emit(configgen.print_config(args.client))
+            return 0
+        if args.cmd == 'migrate-vectors':
+            emit(core.migrate_vectors(remove_npy=args.remove_npy))
             return 0
     except Exception as e:  # noqa: BLE001 - CLI boundary: report, never traceback
         print(json.dumps({'error': f'{type(e).__name__}: {e}'}), file=sys.stderr)

@@ -7,7 +7,10 @@ Thanks for considering a contribution to local-memory.
 - Local-first is the product promise: no cloud services, no mandatory network
   access, no telemetry. Do not add dependencies that break this.
 - Python 3.10+ standard library + numpy + the official `mcp` SDK. Keep the
-  core light; put optional extras (scikit-learn) behind `[semantic]`.
+  core light; put optional extras behind flags: scikit-learn behind
+  `[semantic]`, sqlite-vec behind `[vector]`.
+- The HTTP transports (REST + MCP streamable-http) are stdlib-only on purpose
+  — do not add a web-framework dependency for them.
 - Result row format is a public contract:
   `{session_id, position, content, score, context}`. Changing it is a breaking
   change and needs a discussion in an issue first.

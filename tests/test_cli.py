@@ -32,7 +32,7 @@ def cli(args, env_extra=None, expect_ok=True):
 
 def test_version():
     proc = cli(['--version'], expect_ok=False)
-    assert '0.1.0' in (proc.stdout + proc.stderr)
+    assert '0.2.0' in (proc.stdout + proc.stderr)
 
 
 def test_init_is_idempotent(tmp_path):

@@ -26,6 +26,8 @@ from pathlib import Path
 
 import numpy as np
 
+from . import vectorstore
+
 BATCH = 8
 MAX_TEXT_LEN = 1200
 API_TIMEOUT = 60
@@ -127,6 +129,91 @@ def api_embed(texts: list[str]) -> list[np.ndarray]:
     return out
 
 
+def vec_backend() -> str:
+    """Selected vector storage: 'sqlitevec' | 'npy' (see vectorstore)."""
+    return vectorstore.resolve_backend()
+
+
+def _vec_conn(db_path) -> sqlite3.Connection:
+    """Connection with sqlite-vec loaded (fails fast when the extra is absent)."""
+    if not vectorstore.available():
+        raise EmbeddingError(
+            'sqlite_vec is not installed; pip install sqlite-vec')
+    conn = sqlite3.connect(str(db_path))
+    vectorstore.load_extension(conn)
+    return conn
+
+
+def vec_table_rows(db_path) -> int:
+    """Rows in the model's vec table, 0 when missing or the extra is absent."""
+    if not vectorstore.available():
+        return 0
+    conn = _vec_conn(db_path)
+    try:
+        return vectorstore.table_count(conn, model_key())
+    except sqlite3.Error:
+        return 0
+    finally:
+        conn.close()
+
+
+def sync_vec_table(db_path, ids, mat) -> None:
+    """Mirror freshly embedded vectors into the vec table (no-op for npy).
+
+    Raises EmbeddingError when the sqlite-vec backend is selected but the
+    write fails (the caller decides how to degrade).
+    """
+    if vec_backend() != 'sqlitevec':
+        return
+    if not vectorstore.available():
+        raise EmbeddingError(
+            'MEMORY_VECTOR_BACKEND=sqlitevec but sqlite_vec is not installed')
+    conn = _vec_conn(db_path)
+    try:
+        vectorstore.ensure_table(conn, model_key(), mat.shape[1])
+        vectorstore.upsert(conn, model_key(), ids, mat)
+    except sqlite3.Error as e:
+        raise EmbeddingError(f'sqlite-vec write failed: {e}') from e
+    finally:
+        conn.close()
+
+
+def _vec_knn_results(db_path, rows: list, q: np.ndarray, limit: int) -> list[dict]:
+    """KNN over the vec table, mapped back onto chunk rows (public format).
+
+    Vectors are stored normalized, so cosine similarity = 1 - d^2 / 2.
+    Ties at the k boundary are re-ranked canonically (score desc, chunk id
+    asc) — the same order the .npy matmul path produces.
+    """
+    conn = _vec_conn(db_path)
+    try:
+        # over-fetch: exact ties can displace the canonical top-1 at the
+        # k boundary, so pull extra candidates and re-rank below
+        k = min(len(rows), limit + 5)
+        hits = vectorstore.knn(conn, model_key(), q, k)
+    finally:
+        conn.close()
+    by_id = {r['id']: r for r in rows}
+    scored: list[tuple[float, int, dict]] = []
+    for chunk_id, distance in hits:
+        row = by_id.get(int(chunk_id))
+        if row is None:
+            continue
+        scored.append((1.0 - (distance * distance) / 2.0, int(chunk_id), row))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    results: list[dict] = []
+    for score, _chunk_id, row in scored[:limit]:
+        if score < 0.01:
+            break
+        results.append({
+            'session_id': row['session_id'],
+            'position': row['position'],
+            'content': (row['content'] or '')[:500],
+            'score': round(score, 4),
+        })
+    return results
+
+
 def _select_rows(conn: sqlite3.Connection, limit: int | None) -> list:
     """Deduplicated chunk rows (newest occurrence per content), newest first."""
     if limit is not None:
@@ -180,8 +267,23 @@ def embed_search(rows: list, query: str, limit: int = 5, db_path=None) -> list[d
         all_mat = mat_new if base_mat.size == 0 else np.concatenate(
             [np.asarray(base_mat, dtype=np.float32), mat_new], axis=0)
         save_matrix_cache(db_path, all_ids, all_mat)
+        # best-effort: the .npy cache above is the source of truth; a broken
+        # vec backend must not kill on-the-fly semantic search
+        try:
+            sync_vec_table(db_path, np.asarray(new_ids, dtype=np.int64), mat_new)
+        except EmbeddingError:
+            pass
     else:
         all_ids, all_mat = base_ids, base_mat
+
+    if db_path is not None and vec_backend() == 'sqlitevec':
+        if vec_table_rows(db_path) > 0:
+            q = _norm(np.asarray(api_embed([query])[0], dtype=np.float32))
+            results = _vec_knn_results(db_path, rows, q, limit)
+            if results:
+                return results
+            raise EmbeddingError('no semantic matches above the score threshold')
+        # empty table: fall through to the .npy matrix path below
 
     if len(all_ids) == 0:
         raise EmbeddingError('no embeddings cached; run: local-memory build')
@@ -195,13 +297,15 @@ def embed_search(rows: list, query: str, limit: int = 5, db_path=None) -> list[d
     sims = np.asarray(all_mat, dtype=np.float32) @ q
     order = np.searchsorted(np.asarray(all_ids, dtype=np.int64), np.asarray(ids, dtype=np.int64))
     sims_ordered = sims[order]
-    top = np.argsort(sims_ordered)[-limit:][::-1]
+    # deterministic order: score desc, then chunk id asc (lexsort: last key
+    # is primary). Matches the vec backend's canonical tie-break.
+    rank = np.lexsort((np.asarray(ids, dtype=np.int64), -np.asarray(sims_ordered, dtype=np.float64)))
 
     results: list[dict] = []
-    for idx in top:
+    for idx in rank[:limit]:
         score = float(sims_ordered[idx])
         if score < 0.01:
-            continue
+            break
         row = rows[idx]
         results.append({
             'session_id': row['session_id'],
@@ -244,4 +348,5 @@ def build(db_path, limit: int | None = None) -> dict:
             all_ids, all_mat = new_ids, new_mat
         order = np.argsort(all_ids)
         save_matrix_cache(db_path, all_ids[order], all_mat[order])
+        sync_vec_table(db_path, all_ids[order], all_mat[order])
     return {'embedded': len(todo), 'total': len(rows)}

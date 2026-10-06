@@ -10,14 +10,15 @@
 [![CI](https://img.shields.io/badge/CI-pytest-green.svg)](.github/workflows/ci.yml)
 
 local-memory is a standalone [MCP](https://modelcontextprotocol.io) server
-(stdio transport) that gives any AI agent durable long-term memory: search over
-past sessions (keyword, semantic, exact), a catalog of sessions, full session
-reads, and a write channel for new memories. It works with Claude Code,
-opencode, Cursor, Cline, Codex, or any other MCP client.
+(stdio by default, plain REST and MCP-over-HTTP optional) that gives any AI
+agent durable long-term memory: search over past sessions (keyword, semantic,
+exact), a catalog of sessions, full session reads, and a write channel for new
+memories. It works with Claude Code, opencode, Cursor, Cline, Codex, or any
+other MCP client — or with plain `curl` over REST.
 
 The engine is small and boring on purpose: one SQLite file, the Python
 standard library, and numpy. The only other dependency is the `mcp` package,
-which powers the stdio server.
+which powers the MCP transports; the REST transport is stdlib-only.
 
 ---
 
@@ -46,11 +47,12 @@ agent gets the memory interface it wants; you keep the data you already had.
                  +------------------------------------------------+
                  |              your machine (offline)            |
                  |                                                |
-  MCP client     |   +----------------+          +-------------+  |
-  (Claude Code,  |   |  local-memory  |  stdio   |   SQLite    |  |
-   opencode,     +-->|  MCP server    |<-------->|  memory.db  |  |
-   Cursor, ...)   |   |               |          |  + FTS5     |  |
-   via stdio      |   +-------+-------+          +------+------+ |
+   MCP client     |   +----------------+          +-------------+  |
+   (Claude Code,  |   |  local-memory  |  stdio   |   SQLite    |  |
+    opencode,     +-->|  MCP server    |<-------->|  memory.db  |  |
+    Cursor, ...)   |   |  or REST /    |          |  + FTS5     |  |
+    via stdio,     |   |  MCP-HTTP     |          |  + vec tbl  |  |
+    HTTP, MCP-HTTP |   +-------+-------+          +------+------+ |
                  |           |                              ^      |
                  |           | embeddings (optional,        |      |
                  |           | only if YOU configure it)    |      |
@@ -73,6 +75,10 @@ One database, three search engines, chosen automatically:
 Every result carries a **context window**: the neighboring chunks around the
 hit, so the agent sees what came before and after without an extra round
 trip.
+
+Transports: stdio (default), plain REST, or MCP streamable-http —
+`serve --transport stdio|http|mcp-http`. Vector search: numpy matmul over
+the `.npy` cache, or sqlite-vec inside the database (extra `[vector]`).
 
 ---
 
@@ -114,17 +120,18 @@ repository:
 pip install "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory.git"
 ```
 
-Prefer a local checkout, or want the optional TF-IDF semantic-search fallback
-(scikit-learn)? Clone and install with the extra:
+Prefer a local checkout, or want the optional extras? Clone and install:
 
 ```bash
 git clone https://github.com/Sergey-Vladimirovich-Hankok/local-memory
 cd local-memory
-pip install ".[semantic]"
+pip install ".[semantic]"        # + TF-IDF fallback (scikit-learn)
+pip install ".[vector]"          # + in-database vector search (sqlite-vec)
 ```
 
-Once the package is published on PyPI (not yet — as of v0.1.0 the git
-repository is the only source), this becomes a plain `pip install local-memory`.
+Both extras are optional; the core works with just numpy + `mcp`. Once the
+package is published on PyPI (not yet — the git repository is the only
+source), this becomes a plain `pip install local-memory`.
 
 ### 2. Initialize the database
 
@@ -202,7 +209,14 @@ Cursor / any generic MCP client (`mcpServers` snippet):
 > `command` at the installed binary directly:
 > `"command": "local-memory", "args": ["serve"]` (see `examples/generic_mcp.json`).
 
-Ready-made snippets live in [`examples/`](examples/).
+Ready-made snippets live in [`examples/`](examples/) — or generate one for
+your client without copy-paste errors (tests guard the output against drift
+from `examples/`):
+
+```bash
+local-memory config --client claude      # or: opencode | cursor | generic
+local-memory config --client claude --setup --dry-run   # print the registration command
+```
 
 ---
 
@@ -220,6 +234,10 @@ one process, one database, zero moving parts.
 | `MEMORY_CTX_WINDOW`  | `3`                                      | context window width (neighbors per side) |
 | `MEMORY_MAX_CHUNKS`  | `1000000`                                | cap on rows scanned per search |
 | `MEMORY_MATRIX_CAP`  | `5000`                                   | max new chunks embedded per call |
+| `MEMORY_HTTP_HOST`   | `127.0.0.1`                              | bind address for `serve --transport http` |
+| `MEMORY_HTTP_PORT`   | `8787`                                   | port for `serve --transport http` |
+| `MEMORY_HTTP_TOKEN`  | *(unset)*                                | bearer token for HTTP; **required** when binding off-loopback |
+| `MEMORY_VECTOR_BACKEND` | `auto`                                | vector search backend: `auto` \| `npy` \| `sqlitevec` (extra `[vector]`) |
 
 ---
 
@@ -288,6 +306,66 @@ If no embeddings endpoint is configured, semantic search silently degrades to
 TF-IDF/keyword. Nothing is sent over the network unless you configure a
 `EMBED_API_URL`.
 
+### Vector storage: `.npy` or sqlite-vec
+
+The embedding matrix lives next to the database as
+`embed_cache_<model>.{ids,mat}.npy` (numpy matmul — the permanent fallback).
+With the optional `[vector]` extra, the same vectors can live **inside the
+SQLite database** via [sqlite-vec](https://github.com/asg017/sqlite-vec):
+
+```bash
+pip install ".[vector]"                    # sqlite-vec extension
+local-memory migrate-vectors               # copy the .npy cache into the vec table
+local-memory migrate-vectors --remove-npy  # ...and drop the .npy files
+```
+
+Backend selection: `MEMORY_VECTOR_BACKEND=auto` (default — sqlite-vec when
+installed and populated, otherwise `.npy`), `npy`, or `sqlitevec` (force;
+fails fast if the extension is missing). New chunks are mirrored to the vec
+table automatically. Both backends stay 100% local files.
+
+---
+
+## HTTP / REST mode
+
+Besides stdio, `serve` can run over the network — two extra transports,
+zero new dependencies (stdlib `ThreadingHTTPServer`):
+
+```bash
+local-memory serve --transport http      # plain REST (curl-friendly), port 8787
+local-memory serve --transport mcp-http  # MCP streamable-http, port 8000
+```
+
+REST endpoints (JSON, same shapes as the CLI/MCP tools):
+
+| Endpoint         | Description |
+|------------------|-------------|
+| `GET /health`    | liveness + version |
+| `GET /status`    | database statistics |
+| `GET /overview`  | recent sessions (`?days=7`) |
+| `POST /search`   | `{"query", "limit"?, "semantic"?}` |
+| `POST /ingest`   | `{"session_id", "content", "project"?, "metadata"?}` |
+| `POST /fetch`    | `{"session_id", "position"?, "limit"?}` |
+| `GET /tools`     | MCP tools manifest |
+
+Security: loopback binds (`127.0.0.1`, `::1`, `localhost`) work without a
+token. Binding any other address **requires** a token (`--token` or
+`MEMORY_HTTP_TOKEN`) — otherwise the server refuses to start (fail fast).
+With a token set, every request must send
+`Authorization: Bearer <token>` or `X-Token: <token>` (constant-time
+compare). No TLS — put a reverse proxy or SSH tunnel in front for anything
+beyond loopback.
+
+Example:
+
+```bash
+local-memory serve --transport http &
+curl -s localhost:8787/health
+curl -s -X POST localhost:8787/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "postgres connection pool", "limit": 5}'
+```
+
 ---
 
 ## Privacy
@@ -296,8 +374,10 @@ TF-IDF/keyword. Nothing is sent over the network unless you configure a
   `MEMORY_DB_PATH` (default `~/.local/share/local-memory/`). Back them up or
   delete them like any other file.
 - No telemetry, no update checks, no phone-home of any kind.
-- The only network access in the entire codebase is the embeddings call, and
-  it only happens if you set `EMBED_API_URL` yourself.
+- The only **outgoing** network access in the entire codebase is the
+  embeddings call, and it only happens if you set `EMBED_API_URL` yourself.
+- The HTTP/REST transport is inbound-only (you start it, you bind it) and
+  defaults to loopback; off-loopback binding is refused without a token.
 - `memory_ingest` stores content as-is, unencrypted, in SQLite. If your data
   is sensitive, protect the file with filesystem permissions.
 - Nothing is ever sent to the authors of this project.
@@ -338,10 +418,14 @@ attribution keeps the work traceable. See [NOTICE](NOTICE).
 
 ## Roadmap
 
-- Qdrant / sqlite-vec backend for the embeddings matrix (still local).
-- REST mode (HTTP transport alongside stdio) for non-MCP clients.
-- Plugin packages for specific agents (Claude Code, opencode, Cursor).
+- PyPI release (for now the git repository is the only source).
+- Qdrant backend for the embeddings matrix (sqlite-vec already ships —
+  extra `[vector]`).
+- Plugin packages for specific agents (Claude Code, opencode, Cursor) —
+  `local-memory config --client ...` already generates the snippets.
 - Session summaries via any local LLM (opt-in, offline).
+- Done: REST mode (`serve --transport http` / `mcp-http`), sqlite-vec vector
+  backend, per-client config generator.
 - Not on the roadmap: cloud sync, web UI, Rust rewrites. If it must be local,
   it stays local.
 

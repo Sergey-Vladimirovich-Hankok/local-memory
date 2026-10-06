@@ -135,6 +135,13 @@ def tools_manifest() -> str:
     return json.dumps(_self_test(), ensure_ascii=False)
 
 
+def run_http(host: str = '127.0.0.1', port: int = 8000) -> None:
+    """MCP over HTTP (streamable-http transport), for non-stdio MCP clients."""
+    mcp.settings.host = host
+    mcp.settings.port = int(port)
+    mcp.run(transport='streamable-http')
+
+
 def main() -> None:
     """stdio transport entry point (called by the CLI `serve` subcommand)."""
     mcp.run()
