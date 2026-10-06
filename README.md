@@ -16,7 +16,8 @@ reads, and a write channel for new memories. It works with Claude Code,
 opencode, Cursor, Cline, Codex, or any other MCP client.
 
 The engine is small and boring on purpose: one SQLite file, the Python
-standard library, and numpy. Nothing else is required to run it.
+standard library, and numpy. The only other dependency is the `mcp` package,
+which powers the stdio server.
 
 ---
 
@@ -177,6 +178,10 @@ Cursor / any generic MCP client (`mcpServers` snippet):
   }
 }
 ```
+
+> If you installed from source (step 1) instead of PyPI, `uvx` cannot see the
+> package — point `command` at the installed binary directly:
+> `"command": "local-memory"` (see `examples/generic_mcp.json`).
 
 Ready-made snippets live in [`examples/`](examples/).
 
