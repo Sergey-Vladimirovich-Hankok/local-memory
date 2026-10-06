@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+venv*/
+.env
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local databases and embedding caches (runtime state, never commit)
+*.db
+*.db-wal
+*.db-shm
+embed_cache_*.npy
+
+# Project-local working documents (not part of the public repo)
+ТЗ_*.md
+ДИАГНОЗ_*.md
+ОТЧЁТ_*.md
+REFERENCE_*.py

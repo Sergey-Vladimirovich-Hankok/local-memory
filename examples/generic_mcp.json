@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "local-memory": {
+      "command": "local-memory",
+      "args": ["serve"],
+      "env": {
+        "MEMORY_DB_PATH": "/absolute/path/to/memory.db"
+      }
+    }
+  }
+}

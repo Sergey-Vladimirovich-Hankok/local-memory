@@ -1,0 +1,8 @@
+{
+  "mcp": {
+    "local-memory": {
+      "command": "uvx",
+      "args": ["local-memory", "serve"]
+    }
+  }
+}

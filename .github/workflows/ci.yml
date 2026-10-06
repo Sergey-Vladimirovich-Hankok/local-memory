@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[semantic]"
+          pip install pytest
+
+      - name: Tests
+        run: python -m pytest tests/ -q
+
+      - name: Byte-compile
+        run: python -m py_compile src/local_memory/*.py tests/*.py
+
+      - name: Guard - no non-ASCII text in tracked files
+        run: |
+          if grep -rInP '[\x{0410}-\x{042F}\x{0430}-\x{044F}\x{0451}\x{0401}]' \
+              --include='*.py' --include='*.md' --include='*.json' --include='*.yml' \
+              . --exclude-dir=.git; then
+            echo 'Cyrillic text found in tracked files' >&2
+            exit 1
+          fi
+
+      - name: Guard - no local paths or secrets in tracked files
+        run: |
+          if grep -rInE '/home/|s[e]rgey|@mail|@gmail|ghp[_]|s[k]-[A-Za-z0-9]' \
+              --include='*.py' --include='*.md' --include='*.json' --include='*.yml' \
+              . --exclude-dir=.git; then
+            echo 'Local paths or secrets found in tracked files' >&2
+            exit 1
+          fi
