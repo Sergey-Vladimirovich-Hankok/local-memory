@@ -106,18 +106,21 @@ Result rows (a public contract — stable across versions):
 
 ### 1. Install
 
+From source (recommended until the package is published on PyPI):
+
+```bash
+git clone https://github.com/Sergey-Vladimirovich-Hankok/local-memory
+cd local-memory
+pip install -e .            # core (keyword + FTS search)
+pip install -e ".[semantic]"  # + TF-IDF semantic search fallback (scikit-learn)
+```
+
+Once available on PyPI:
+
 ```bash
 pip install local-memory
 # optional: TF-IDF semantic search fallback
 pip install local-memory[semantic]
-```
-
-Or from source:
-
-```bash
-git clone <repo-url> local-memory
-cd local-memory
-pip install -e ".[semantic]"
 ```
 
 ### 2. Initialize the database
