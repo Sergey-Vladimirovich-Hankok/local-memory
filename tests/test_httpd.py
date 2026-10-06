@@ -126,6 +126,43 @@ def test_invalid_json_body_is_400(base_url):
         assert 'error' in json.loads(e.read().decode('utf-8'))
 
 
+def test_search_limit_negative_is_400(base_url):
+    code, body = req(base_url, '/search', 'POST',
+                     {'query': 'postgres', 'limit': -1})
+    assert code == 400 and 'error' in body
+
+
+def test_search_limit_zero_is_400(base_url):
+    code, body = req(base_url, '/search', 'POST',
+                     {'query': 'postgres', 'limit': 0})
+    assert code == 400 and 'error' in body
+
+
+def test_search_limit_one_returns_exactly_one(base_url):
+    code, body = req(base_url, '/search', 'POST',
+                     {'query': 'postgres', 'limit': 1})
+    assert code == 200
+    assert len(body['results']) == 1
+
+
+def test_fetch_limit_negative_is_400(base_url):
+    code, body = req(base_url, '/fetch', 'POST',
+                     {'session_id': 'alpha', 'limit': -1})
+    assert code == 400 and 'error' in body
+
+
+def test_garbage_content_length_is_400(base_url):
+    import socket as _socket
+    from urllib.parse import urlparse
+    u = urlparse(base_url)
+    with _socket.create_connection((u.hostname, u.port), timeout=10) as s:
+        s.sendall(b'POST /search HTTP/1.1\r\nHost: local\r\n'
+                  b'Content-Length: abc\r\n\r\n')
+        status_line = s.recv(4096).decode('utf-8', 'replace')
+        status_line = status_line.split('\r\n', 1)[0]
+    assert ' 400 ' in status_line
+
+
 def test_bind_policy_refuses_offloopback_without_token():
     with pytest.raises(RuntimeError):
         httpd.make_server('0.0.0.0', 0)
@@ -152,6 +189,12 @@ def test_token_required_when_set(db):
         code, body = req(base, '/health',
                          headers={'Authorization': 'Bearer wrong'})
         assert code == 401
+        # tokens with surrounding whitespace must be accepted (strip)
+        code, body = req(base, '/health', headers={'X-Token': '  sekrit  '})
+        assert code == 200 and body['ok'] is True
+        code, body = req(base, '/health',
+                         headers={'Authorization': '  Bearer   sekrit  '})
+        assert code == 200 and body['ok'] is True
     finally:
         srv.shutdown()
         srv.server_close()

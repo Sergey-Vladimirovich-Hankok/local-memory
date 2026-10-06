@@ -309,7 +309,9 @@ TF-IDF/keyword. Nothing is sent over the network unless you configure a
 ### Vector storage: `.npy` or sqlite-vec
 
 The embedding matrix lives next to the database as
-`embed_cache_<model>.{ids,mat}.npy` (numpy matmul — the permanent fallback).
+`embed_cache_<dbname>_<model>.{ids,mat}.npy` (numpy matmul — the permanent
+fallback). The cache key includes the database filename, so multiple databases
+in the same directory never share vectors.
 With the optional `[vector]` extra, the same vectors can live **inside the
 SQLite database** via [sqlite-vec](https://github.com/asg017/sqlite-vec):
 

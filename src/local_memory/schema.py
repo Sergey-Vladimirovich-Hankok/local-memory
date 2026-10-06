@@ -88,7 +88,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_unique_content ON chunks_unique(con
 """
 
 
+def _position_index_exists(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' "
+        "AND name = 'idx_chunks_pos_unique'").fetchone()
+    return row is not None
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create all tables, indexes and triggers if missing. Idempotent."""
+    """Create all tables, indexes and triggers if missing. Idempotent.
+
+    The UNIQUE index on chunks(session_id, position) is the last step: older
+    databases may contain duplicate positions (racy ingest), so the stale
+    rows are dropped first (newest per slot wins) and only then the index
+    is created.
+    """
     conn.executescript(SCHEMA)
+    if not _position_index_exists(conn):
+        conn.execute("""
+            DELETE FROM chunks WHERE id NOT IN (
+                SELECT MAX(id) FROM chunks
+                GROUP BY COALESCE(session_id, ''), COALESCE(position, -1))
+        """)
+        conn.execute(
+            'CREATE UNIQUE INDEX idx_chunks_pos_unique '
+            'ON chunks(session_id, position)')
     conn.commit()

@@ -79,17 +79,22 @@ class _Handler(BaseHTTPRequestHandler):
     def _authorized(self) -> None:
         if not self.auth_token:
             return
-        candidate = self.headers.get('Authorization', '')
+        candidate = self.headers.get('Authorization', '').strip()
         if candidate.startswith('Bearer '):
             candidate = candidate[len('Bearer '):].strip()
         else:
-            candidate = self.headers.get('X-Token', '')
+            candidate = self.headers.get('X-Token', '').strip()
         if not hmac.compare_digest(
                 candidate.encode('utf-8'), self.auth_token.encode('utf-8')):
             raise HttpError(401, 'unauthorized: missing or invalid bearer token')
 
     def _body(self) -> dict:
-        length = int(self.headers.get('Content-Length') or 0)
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            raise HttpError(400, 'invalid Content-Length header')
+        if length < 0:
+            raise HttpError(400, 'invalid Content-Length header')
         raw = self.rfile.read(length) if length > 0 else b''
         if not raw:
             return {}
@@ -102,10 +107,15 @@ class _Handler(BaseHTTPRequestHandler):
         return data
 
     @staticmethod
-    def _int_field(data: dict, name: str, default: int) -> int:
+    def _int_field(data: dict, name: str, default: int,
+                   minimum: int = 0, maximum: int | None = None) -> int:
         value = data.get(name, default)
         if isinstance(value, bool) or not isinstance(value, int):
             raise HttpError(400, f'field {name!r} must be an integer')
+        if value < minimum:
+            raise HttpError(400, f'field {name!r} must be >= {minimum}')
+        if maximum is not None and value > maximum:
+            raise HttpError(400, f'field {name!r} must be <= {maximum}')
         return value
 
     # -- routes -----------------------------------------------------------
@@ -140,7 +150,7 @@ class _Handler(BaseHTTPRequestHandler):
             query = data.get('query')
             if not isinstance(query, str) or not query.strip():
                 raise HttpError(400, 'field "query" (non-empty string) is required')
-            limit = self._int_field(data, 'limit', 5)
+            limit = self._int_field(data, 'limit', 5, minimum=1, maximum=1000)
             semantic = bool(data.get('semantic', False))
             fn = core.semantic_search if semantic else core.keyword_search
             self._send(200, fn(query, limit=limit))
@@ -163,8 +173,9 @@ class _Handler(BaseHTTPRequestHandler):
                 raise HttpError(400, 'field "session_id" (non-empty string) is required')
             self._send(200, core.fetch(
                 session_id,
-                position=self._int_field(data, 'position', 0),
-                limit=self._int_field(data, 'limit', 20)))
+                position=self._int_field(data, 'position', 0, minimum=0),
+                limit=self._int_field(data, 'limit', 20, minimum=1,
+                                     maximum=1000)))
         elif path in ('/health', '/status', '/overview', '/tools'):
             raise HttpError(405, f'{path} is GET-only', allow='GET')
         else:

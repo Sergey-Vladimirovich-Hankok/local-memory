@@ -88,6 +88,53 @@ def test_ingest_requires_text_or_file(tmp_path):
     assert 'provide --text or --file' in proc.stderr
 
 
+def test_mcp_http_offloopback_without_token_refuses(tmp_path):
+    # regression: the mcp-http branch skipped validate_bind_policy, so
+    # `serve --transport mcp-http --host 0.0.0.0` started with no token
+    dbp = str(tmp_path / 'memory.db')
+    proc = cli(['serve', '--transport', 'mcp-http', '--host', '0.0.0.0',
+                '--port', '18931'],
+               env_extra={'MEMORY_DB_PATH': dbp}, expect_ok=False)
+    assert proc.returncode == 1
+    assert 'refusing to bind' in proc.stderr
+
+
+def test_mcp_http_loopback_without_token_is_allowed(tmp_path):
+    # loopback binds need no token: the CLI must pass the policy check and
+    # reach the (blocking) server start — kill it after it comes up
+    import signal
+    import socket
+    import time
+    dbp = str(tmp_path / 'memory.db')
+    env = dict(os.environ, PYTHONPATH=str(ROOT / 'src'), MEMORY_DB_PATH=dbp)
+    proc = subprocess.Popen(
+        [sys.executable, '-m', 'local_memory', 'serve',
+         '--transport', 'mcp-http', '--host', '127.0.0.1', '--port', '18932'],
+        cwd=str(ROOT), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True)
+    try:
+        deadline = time.time() + 15
+        up = False
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                with socket.create_connection(('127.0.0.1', 18932),
+                                              timeout=0.25):
+                    up = True
+                    break
+            except OSError:
+                time.sleep(0.2)
+        assert up, f'loopback mcp-http server should start (rc={proc.poll()})'
+    finally:
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
 def test_build_without_api_fails_cleanly(tmp_path):
     dbp = str(tmp_path / 'memory.db')
     cli(['init'], env_extra={'MEMORY_DB_PATH': dbp})

@@ -71,8 +71,9 @@ def test_embedded_search_with_mocked_api(db, monkeypatch):
     top = out['results'][0]
     assert 'postgres' in top['content']
     assert top['score'] >= 0.7
-    # matrix cache must have been materialized next to the db
-    assert (db.parent / 'embed_cache_local-embedder.ids.npy').exists()
+    # matrix cache must have been materialized next to the db, keyed by
+    # the database FILE name (memory.db -> 'memory')
+    assert (db.parent / 'embed_cache_memory_local-embedder.ids.npy').exists()
 
 
 def test_embedded_search_second_call_uses_cache(db, monkeypatch):
@@ -104,6 +105,25 @@ def test_build_with_mocked_api(db, monkeypatch):
     out2 = core.semantic_search('postgres timeout')
     assert out2['engine'] == 'embeddings'
     assert 'postgres' in out2['results'][0]['content']
+
+
+def test_two_dbs_same_dir_have_independent_caches(tmp_path, monkeypatch):
+    # regression: the cache key used to be (dir, model) only, so a second
+    # database in the same directory silently inherited the first one's
+    # vectors and reported 'embedded: 0'
+    monkeypatch.setenv('EMBED_OFF', '')
+    monkeypatch.setenv('EMBED_API_URL', 'http://mock.invalid/v1/embeddings')
+    monkeypatch.setattr(embeddings, 'api_embed', _fake_api_embed)
+    db1, db2 = tmp_path / 'first.db', tmp_path / 'second.db'
+    core.ingest('s1', 'postgres timeout in first db', db=db1)
+    core.ingest('s2', 'react render loop in second db', db=db2)
+    out1 = core.build(db=db1)
+    out2 = core.build(db=db2)
+    assert out1['embedded'] == 1 and out1['total'] == 1
+    assert out2['embedded'] == 1, 'second db must embed its own chunks'
+    assert out2['total'] == 1
+    assert (tmp_path / 'embed_cache_first_local-embedder.ids.npy').exists()
+    assert (tmp_path / 'embed_cache_second_local-embedder.ids.npy').exists()
 
 
 def test_build_without_api_fails_cleanly(db, monkeypatch):

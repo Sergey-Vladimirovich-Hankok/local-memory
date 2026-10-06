@@ -12,8 +12,11 @@ Strictly opt-in and offline-safe:
     - EMBED_OFF=1       -> EmbeddingError immediately
     - no network call is ever made unless the operator sets EMBED_API_URL
 
-Chunk vectors are cached next to the database as embed_cache_<model>.{ids,mat}.npy
-(mmap'd on load) and mirrored in the chunk_embeddings table for durability.
+Chunk vectors are cached next to the database as
+embed_cache_<dbname>_<model>.{ids,mat}.npy (mmap'd on load) and mirrored in
+the chunk_embeddings table for durability. The cache is keyed per database
+FILE (name without extension), so two databases in one directory never share
+vectors.
 """
 from __future__ import annotations
 
@@ -70,7 +73,10 @@ def _norm(v: np.ndarray) -> np.ndarray:
 
 
 def cache_paths(db_path) -> tuple[Path, Path]:
-    base = Path(db_path).parent / f'embed_cache_{model_key()}'
+    p = Path(db_path)
+    # include the database filename (without extension) in the key: two
+    # databases in the same directory must not share the vector cache
+    base = p.parent / f'embed_cache_{p.stem}_{model_key()}'
     return Path(f'{base}.ids.npy'), Path(f'{base}.mat.npy')
 
 

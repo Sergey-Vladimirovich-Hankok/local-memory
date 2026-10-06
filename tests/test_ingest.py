@@ -87,6 +87,67 @@ def test_ingest_validates_input(db):
         core.ingest('x', '')
 
 
+def test_parallel_ingest_positions_are_unique(db):
+    # regression: position = MAX(position)+1 was racy under concurrent
+    # writers (ThreadingHTTPServer) and produced duplicate positions
+    import concurrent.futures as cf
+
+    def one(i):
+        return core.ingest('race-sess', f'parallel chunk {i}')['position']
+
+    with cf.ThreadPoolExecutor(max_workers=20) as pool:
+        positions = list(pool.map(one, range(20)))
+    assert sorted(positions) == list(range(20))
+
+
+def test_duplicate_position_insert_is_rejected(db):
+    # the UNIQUE index on (session_id, position) is the last line of defense
+    import pytest
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute(
+            "INSERT INTO chunks (session_id, position, content) "
+            "VALUES ('dup-sess', 0, 'first')")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO chunks (session_id, position, content) "
+                "VALUES ('dup-sess', 0, 'second')")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
+def test_legacy_duplicate_positions_are_deduped_on_open(tmp_path):
+    # simulate an older database (pre-unique-index) that already contains
+    # racy duplicate positions; ensure_schema must keep the newest row per
+    # slot and still create the index
+    path = tmp_path / 'legacy.db'
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            'CREATE TABLE chunks (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'session_id TEXT, position INTEGER, content TEXT, '
+            'reasoning TEXT, tool_calls TEXT, tool_call_results TEXT, '
+            'prev_id INTEGER, next_id INTEGER, metadata TEXT DEFAULT \'{}\')')
+        conn.execute(
+            "INSERT INTO chunks (session_id, position, content) "
+            "VALUES ('legacy', 0, 'old row')")
+        conn.execute(
+            "INSERT INTO chunks (session_id, position, content) "
+            "VALUES ('legacy', 0, 'new row')")
+        conn.commit()
+    finally:
+        conn.close()
+    reopened = core.connect(path)
+    try:
+        rows = reopened.execute(
+            "SELECT content FROM chunks WHERE session_id = 'legacy' "
+            'ORDER BY position').fetchall()
+        assert [r['content'] for r in rows] == ['new row']
+    finally:
+        reopened.close()
+
+
 def test_fetch_returns_parsed_tool_calls(db):
     conn = sqlite3.connect(str(db))
     try:

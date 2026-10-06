@@ -109,6 +109,8 @@ def main(argv=None) -> int:
                 return 0
             # mcp-http: MCP streamable-http transport
             port = args.port if args.port is not None else 8000
+            from . import httpd
+            httpd.validate_bind_policy(host, token)
             from . import server as srv
             srv.run_http(host, port)
             return 0

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from . import vectorstore
 
 DEFAULT_DB = Path.home() / '.local' / 'share' / 'local-memory' / 'memory.db'
 TFIDF_ROW_CAP = 50000
+_INGEST_LOCK = threading.Lock()
+_INGEST_RETRIES = 3
 
 
 def db_path(db=None) -> Path:
@@ -42,12 +45,17 @@ def max_chunks() -> int:
 
 
 def connect(db=None) -> sqlite3.Connection:
-    """Open the database (creating the file/dir if needed) with Row factory."""
+    """Open the database (creating the file/dir if needed) with Row factory.
+
+    The schema is guaranteed to exist (idempotent), so a fresh database is
+    fully usable for search/overview/fetch without an explicit `init`.
+    """
     path = db_path(db)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     conn.execute('PRAGMA busy_timeout = 5000')
     conn.row_factory = sqlite3.Row
+    schema.ensure_schema(conn)
     return conn
 
 
@@ -246,6 +254,11 @@ def ingest(session_id: str, content: str, project: str = '',
 
     This is the write channel: a client hook or plugin calls it once per
     message/chunk. The FTS index is maintained by schema triggers.
+
+    Position assignment is race-safe: the read-compute-insert section runs
+    under a per-process lock, and the UNIQUE index on
+    chunks(session_id, position) (plus a retry on collision) protects
+    against writers in other processes.
     """
     if not session_id:
         raise ValueError('session_id is required')
@@ -257,39 +270,55 @@ def ingest(session_id: str, content: str, project: str = '',
     try:
         schema.ensure_schema(conn)
         now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
-        last = conn.execute(
-            'SELECT MAX(position) FROM chunks WHERE session_id = ?',
-            (session_id,),
-        ).fetchone()[0]
-        position = int(last) + 1 if last is not None else 0
         meta = json.dumps(metadata) if metadata is not None else '{}'
-        conn.execute(
-            'INSERT INTO chunks (session_id, position, content, metadata) '
-            'VALUES (?, ?, ?, ?)',
-            (session_id, position, content, meta),
-        )
-        conn.execute("""
-            INSERT INTO sessions (id, project, start_time, message_count, total_chars)
-            VALUES (?, ?, ?, 1, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                project = CASE WHEN excluded.project != ''
-                               THEN excluded.project ELSE sessions.project END,
-                end_time = excluded.start_time,
-                message_count = sessions.message_count + 1,
-                total_chars = sessions.total_chars + excluded.total_chars
-        """, (session_id, project, now, len(content)))
-        conn.execute("""
-            INSERT INTO session_summaries
-                (session_id, title, message_count, start_time, last_active)
-            VALUES (?, ?, 1, ?, ?)
-            ON CONFLICT(session_id) DO UPDATE SET
-                last_active = excluded.last_active,
-                title = COALESCE(NULLIF(session_summaries.title, ''),
-                                 excluded.title),
-                message_count = COALESCE(session_summaries.message_count, 0) + 1
-        """, (session_id, session_id, now, now))
-        conn.commit()
-        return {'session_id': session_id, 'position': position, 'ok': True}
+        collision: sqlite3.Error | None = None
+        for _ in range(_INGEST_RETRIES):
+            with _INGEST_LOCK:
+                try:
+                    last = conn.execute(
+                        'SELECT MAX(position) FROM chunks WHERE session_id = ?',
+                        (session_id,),
+                    ).fetchone()[0]
+                    position = int(last) + 1 if last is not None else 0
+                    conn.execute(
+                        'INSERT INTO chunks (session_id, position, content, metadata) '
+                        'VALUES (?, ?, ?, ?)',
+                        (session_id, position, content, meta),
+                    )
+                    conn.execute("""
+                        INSERT INTO sessions
+                            (id, project, start_time, message_count, total_chars)
+                        VALUES (?, ?, ?, 1, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            project = CASE WHEN excluded.project != ''
+                                           THEN excluded.project
+                                           ELSE sessions.project END,
+                            end_time = excluded.start_time,
+                            message_count = sessions.message_count + 1,
+                            total_chars = sessions.total_chars + excluded.total_chars
+                    """, (session_id, project, now, len(content)))
+                    conn.execute("""
+                        INSERT INTO session_summaries
+                            (session_id, title, message_count, start_time, last_active)
+                        VALUES (?, ?, 1, ?, ?)
+                        ON CONFLICT(session_id) DO UPDATE SET
+                            last_active = excluded.last_active,
+                            title = COALESCE(NULLIF(session_summaries.title, ''),
+                                             excluded.title),
+                            message_count =
+                                COALESCE(session_summaries.message_count, 0) + 1
+                    """, (session_id, session_id, now, now))
+                    conn.commit()
+                    return {'session_id': session_id, 'position': position,
+                            'ok': True}
+                except sqlite3.IntegrityError as e:
+                    # another writer claimed this position first (cross-process
+                    # race): recompute MAX(position) and retry
+                    conn.rollback()
+                    collision = e
+        raise RuntimeError(
+            f'could not assign a unique chunk position after '
+            f'{_INGEST_RETRIES} attempts: {collision}')
     finally:
         conn.close()
 
