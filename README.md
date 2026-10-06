@@ -113,25 +113,20 @@ Result rows (a public contract — stable across versions):
 
 ### 1. Install
 
-local-memory is **not published on PyPI yet** — install it from the git
-repository:
-
 ```bash
-pip install "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory.git"
+pip install local-memory
 ```
 
-Prefer a local checkout, or want the optional extras? Clone and install:
+Want the optional extras?
 
 ```bash
-git clone https://github.com/Sergey-Vladimirovich-Hankok/local-memory
-cd local-memory
-pip install ".[semantic]"        # + TF-IDF fallback (scikit-learn)
-pip install ".[vector]"          # + in-database vector search (sqlite-vec)
+pip install "local-memory[semantic]"   # + TF-IDF fallback (scikit-learn)
+pip install "local-memory[vector]"     # + in-database vector search (sqlite-vec)
 ```
 
-Both extras are optional; the core works with just numpy + `mcp`. Once the
-package is published on PyPI (not yet — the git repository is the only
-source), this becomes a plain `pip install local-memory`.
+Both extras are optional; the core works with just numpy + `mcp`. Prefer a
+local checkout? Clone and `pip install ".[semantic]"` from the repository
+instead.
 
 ### 2. Initialize the database
 
@@ -156,17 +151,17 @@ local-memory search "pool timeout" --semantic
 
 ### 5. Connect an MCP client
 
-The package is not on PyPI yet, so MCP clients run it with `uvx` straight
-from the git repository — `uvx` builds and caches it for you:
+MCP clients can run it with `uvx` — it fetches and caches the package for
+you:
 
 ```bash
-uvx --from "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory" local-memory serve
+uvx local-memory serve
 ```
 
 Claude Code:
 
 ```bash
-claude mcp add local-memory -- uvx --from "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory" local-memory serve
+claude mcp add local-memory -- uvx local-memory serve
 ```
 
 opencode (`opencode.json`):
@@ -176,12 +171,7 @@ opencode (`opencode.json`):
   "mcp": {
     "local-memory": {
       "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory",
-        "local-memory",
-        "serve"
-      ]
+      "args": ["local-memory", "serve"]
     }
   }
 }
@@ -194,12 +184,7 @@ Cursor / any generic MCP client (`mcpServers` snippet):
   "mcpServers": {
     "local-memory": {
       "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory",
-        "local-memory",
-        "serve"
-      ]
+      "args": ["local-memory", "serve"]
     }
   }
 }

@@ -2,10 +2,8 @@
 
 ## 1. Install
 
-The package is not on PyPI yet — install from the git repository:
-
 ```bash
-pip install "git+https://github.com/Sergey-Vladimirovich-Hankok/local-memory.git"
+pip install local-memory
 local-memory init
 ```
 
