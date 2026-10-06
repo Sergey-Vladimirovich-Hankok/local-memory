@@ -1,6 +1,6 @@
 # Core runtime dependencies
 numpy>=1.24
-mcp>=1.0
+mcp>=1.0,<2
 
 # Optional: TF-IDF semantic search fallback (recommended)
 #   pip install local-memory[semantic]
